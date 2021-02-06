@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import math
+from sklearn.utils import shuffle
 
 
 # grow(node n, dataset D, atrributes A)
@@ -41,17 +42,18 @@ class Node:
 
 def main():
 
-    pd.options.mode.chained_assignment = None  # default='warn'
-
     data = pd.read_csv('adult.data.csv')
     test_data = pd.read_csv('adult.test.csv')
 
     categorical_columns = ['workclass', 'education', 'marital-status',
                            'occupation',  'relationship', 'race', 'sex', 'native-country']
 
+    # Data Cleaning
+
     data = data[data['income'] != '?']
 
-    # data = data[data['workclass'].str.replace(max(data.groupby(['income']).count()))]
+    def trim_strings(x): return x.strip() if isinstance(x, str) else x
+    data = data.applymap(trim_strings)
 
     rich = data[data['income'] == '>50K']
     poor = data[data['income'] == '<=50K']
@@ -60,23 +62,27 @@ def main():
         richMode = rich[attr].mode()[0].strip()
         poorMode = poor[attr].mode()[0].strip()
 
-        rich[attr] = rich[attr].replace(
-            to_replace=r'\?', value=richMode, regex=True)
-        poor[attr] = poor[attr].replace(
-            to_replace=r'\?', value=poorMode, regex=True)
+        data.loc[((data[attr] == "?") & (data['income'] == '>50K')),
+                 attr] = richMode
+        data.loc[((data[attr] == "?") & (data['income'] == '<=50K')),
+                 attr] = poorMode
 
-    newDf = pd.concat([rich, poor], axis=0)
-    # data['workclass'] = data[data['income'] == '>50K']['workclass'].replace(
-    #     to_replace=r'\?', value=rich['workclass'].mode()[0], regex=True)
-    # data['workclass'] = data[data['income'] == '<=50K']['workclass'].replace(
-    #     to_replace=r'\?', value=rich['workclass'].mode()[0], regex=True)
+    # train-test-split
 
-    # data['workclass'] = np.where(
-    # data['workclass'] == '?' and data['income'] == '>50K', richMode, data["workclass"])
+    total_numRows = data['income'].count()
+    validation_numRows = math.floor((total_numRows * 0.1))
 
-    # print(data['workclass'].value_counts())
-    # print(data[data['income'] == '>50K']['workclass'])
-    print(newDf['workclass'].value_counts())
+    validation_data = data[0: validation_numRows]
+
+    trainingRange = math.floor((total_numRows - validation_numRows) / 5)
+
+    training_sets = []
+
+    for i in range(5):
+        start = validation_numRows + trainingRange * i
+        stop = validation_numRows + trainingRange * (i+1)
+        training_sets.append(
+            data[start: stop])
 
 
 if __name__ == "__main__":
