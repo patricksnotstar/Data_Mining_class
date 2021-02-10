@@ -30,36 +30,88 @@ categorical_columns = ['workclass', 'education', 'marital-status',
 
 
 class Node:
-    def __init__(self, parent, attribute, data, label):
+    def __init__(self, parent, split_value, label, lessThan):
         self.parent = parent
-        self.attribute = attribute
-        self.data = data
+        self.attribute = None
+        self.split_value = split_value
         self.label = label
+        self.lessThan = lessThan
+        self.children = []
 
     def append_child(self, node):
         self.children.append(node)
 
 
-def grow(node, data, attr):
-    if not attr:
-        node.label = node.data['income'].mode()[0]
+def grow(node, data, attr, majority):
+    if len(data) == 0:
+        return
+    richMajor = len(data[data['income'] == '>50K']) / len(data) >= majority
+    poorMajor = len(data[data['income'] == '<=50K']) / len(data) >= majority
+    if len(attr) == 0 or (richMajor or poorMajor):
+        node.label = data['income'].mode()[0]
+        return
     else:
-        infoGain = {}
-        for a in attr:
-            if a in categorical_columns:
-                infoGain[a] = calc_informationGain(
-                    data, partition_cat(data, a).values())
+        best_splitAttr, best_splitValue, partitions = calc_bestPartition(
+            data, attr)
+        node.attribute = best_splitAttr
+        for key in partitions.keys():
+            if best_splitAttr in categorical_columns:
+                child = Node(node, key, "Not Leaf", None)
             else:
-                infoGain[a] = calc_informationGain(
-                    data, partition_cont(data, a)[0])
-        max_infoGain_attr = max(infoGain, key=infoGain.get)
-        node.attribute = max_infoGain_attr
+                child = Node(node, best_splitValue, 'Not Leaf', key)
+            attr_copy = copy.deepcopy(attr)
+            attr_copy.remove(best_splitAttr)
+            node.append_child(child)
+            if len(partitions[key]) == 0:
+                node.label = data['income'].mode()[0]
+                return
+            grow(child, partitions[key], attr_copy, majority)
+
+
+def traverse_tree(data, node):
+    if len(node.children) > 0:
         if node.attribute in categorical_columns:
-            num_partitions = len(partition_cat(data, node.attribute).values())
+            for child in node.children:
+                if child.split_value == data[node.attribute]:
+                    temp = traverse_tree(data, child)
+                    return temp
+
         else:
-            num_partitions = len(partition_cont(data, node.attribute)[0])
-        for i in range(num_partitions):
-            # WIP
+            if node.children[0].lessThan and data[node.attribute] <= node.children[0].split_value:
+                temp = traverse_tree(
+                    data, node.children[0])
+                return temp
+            elif len(node.children) > 1:
+                temp = traverse_tree(
+                    data, node.children[1])
+                return temp
+    else:
+        return node.label
+
+
+def calc_bestPartition(data, attr):
+    best_infoGain = -1
+    best_splitAttr = None
+    best_splitValue = None
+    partitions = None
+    for a in attr:
+        if a in categorical_columns:
+            partitions_dict = partition_cat(data, a)
+            infoGain = calc_informationGain(data, partitions_dict)
+            if infoGain > best_infoGain:
+                best_infoGain = infoGain
+                best_splitAttr = a
+                best_splitValue = partitions_dict.keys()
+                partitions = partitions_dict
+        else:
+            temp_partitions, split_on = partition_cont(data, a)
+            infoGain = calc_informationGain(data, temp_partitions)
+            if infoGain > best_infoGain:
+                best_infoGain = infoGain
+                best_splitAttr = a
+                best_splitValue = split_on
+                partitions = temp_partitions
+    return best_splitAttr, best_splitValue, partitions
 
 
 def calc_entropy(data):
@@ -77,9 +129,10 @@ def calc_entropy(data):
 def calc_informationGain(data, partitions):
     data_count = len(data)
     teeEye_entropy = 0
-    for part in partitions:
+    for key in partitions.keys():
         teeEye_entropy = teeEye_entropy + \
-            ((len(part) / data_count) * calc_entropy(part))
+            ((len(partitions[key]) / data_count)
+             * calc_entropy(partitions[key]))
 
     return calc_entropy(data) - (teeEye_entropy)
 
@@ -89,27 +142,25 @@ def partition_cat(data, column_name):
     dfDict = {teeEye: pd.DataFrame for teeEye in unique_values}
     for teeEye in dfDict.keys():
         dfDict[teeEye] = data[:][data[column_name] == teeEye]
-
     return dfDict
 
 
 def partition_cont(data, column_name):
-    partitions = []
-
+    partitions = {}
     unique_values = data[column_name].unique()
     unique_values.sort()
     max_infoGain = 0
     split_on = 0
     for i in unique_values[::math.ceil(len(unique_values) * 0.05)]:
-        temp = []
-        temp.append(data[data[column_name] < i])
-        temp.append(data[data[column_name] >= i])
+        temp = {}
+        temp[True] = data[data[column_name] <= i]
+        temp[False] = data[data[column_name] > i]
         temp_infoGain = calc_informationGain(data, temp)
         if temp_infoGain > max_infoGain:
             partitions = copy.deepcopy(temp)
             max_infoGain = temp_infoGain
             split_on = i
-    return (partitions, split_on)
+    return partitions, split_on
 
 
 def main():
@@ -119,6 +170,9 @@ def main():
 
     categorical_columns = ['workclass', 'education', 'marital-status',
                            'occupation',  'relationship', 'race', 'sex', 'native-country']
+
+    categories = list(data.columns)
+    categories.remove('income')
 
     # Data Cleaning
 
@@ -156,8 +210,13 @@ def main():
         training_sets.append(
             data[start: stop])
 
-    print(calc_informationGain(data, partition_cont(data, 'fnlwgt')))
-    # print(calc_informationGain(data, partition_cat(data, 'workclass')))
+    root = Node(None, None, "Not Leaf", None)
+    grow(root, data, categories, 0.80)
+
+    temp = data.apply(traverse_tree, node=root, axis=1)
+    data['predicted_label'] = temp
+    print(data.head(20))
+    print(len(data[data['income'] == data['predicted_label']])*100/len(data))
 
 
 if __name__ == "__main__":
