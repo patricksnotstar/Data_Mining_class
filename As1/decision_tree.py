@@ -1,4 +1,6 @@
 import numpy as np
+from numpy.lib.arraysetops import unique
+from numpy.lib.shape_base import split
 import pandas as pd
 import math
 from sklearn.utils import shuffle
@@ -7,6 +9,7 @@ import copy
 categorical_columns = ['workclass', 'education', 'marital-status',
                        'occupation',  'relationship', 'race', 'sex', 'native-country']
 
+used_cont_values = {}
 # grow(node n, dataset D, atrributes A)
 #     if A is empty or then
 #         n.label = majority label in D
@@ -54,17 +57,16 @@ def grow(node, data, attr, majority):
         best_splitAttr, best_splitValue, partitions = calc_bestPartition(
             data, attr)
         node.attribute = best_splitAttr
+        node.label = data['income'].mode()[0]
         for key in partitions.keys():
             if best_splitAttr in categorical_columns:
-                child = Node(node, key, "Not Leaf", None)
+                child = Node(node, key, None, None)
             else:
-                child = Node(node, best_splitValue, 'Not Leaf', key)
+                child = Node(node, best_splitValue, None, key)
             attr_copy = copy.deepcopy(attr)
-            attr_copy.remove(best_splitAttr)
+            if key in categorical_columns:
+                attr_copy.remove(best_splitAttr)
             node.append_child(child)
-            if len(partitions[key]) == 0:
-                node.label = data['income'].mode()[0]
-                return
             grow(child, partitions[key], attr_copy, majority)
 
 
@@ -87,6 +89,32 @@ def traverse_tree(data, node):
                 return temp
     else:
         return node.label
+
+
+def prune(root, curr_node, val_data):
+    if len(curr_node.children) == 0:
+        og_accuracy = calc_accuracy(root, val_data)
+        curr_node.parent.children.remove(curr_node)
+        new_accuracy = calc_accuracy(root, val_data)
+        if og_accuracy > new_accuracy:
+            curr_node.parent.children.append(curr_node)
+            return
+    else:
+        for child in curr_node.children:
+            prune(root, child, val_data)
+        if len(curr_node.children) == 0:
+            og_accuracy = calc_accuracy(root, val_data)
+            curr_node.parent.children.remove(curr_node)
+            new_accuracy = calc_accuracy(root, val_data)
+            if og_accuracy > new_accuracy:
+                curr_node.parent.children.append(curr_node)
+                return
+
+
+def calc_accuracy(root, data):
+    temp = data.apply(traverse_tree, node=root, axis=1)
+    data['predicted_label'] = temp
+    return len(data[data['income'] == data['predicted_label']])*100/len(data)
 
 
 def calc_bestPartition(data, attr):
@@ -148,6 +176,9 @@ def partition_cat(data, column_name):
 def partition_cont(data, column_name):
     partitions = {}
     unique_values = data[column_name].unique()
+    for val in used_cont_values[column_name]:
+        # Drop the unique values that have been used to split the same attribute
+        np.delete(unique_values, np.where(unique_values == val), 0)
     unique_values.sort()
     max_infoGain = 0
     split_on = 0
@@ -160,11 +191,13 @@ def partition_cont(data, column_name):
             partitions = copy.deepcopy(temp)
             max_infoGain = temp_infoGain
             split_on = i
+            used_cont_values[column_name].append(i)
     return partitions, split_on
 
 
 def main():
 
+    # Initializing
     data = pd.read_csv('adult.data.csv')
     test_data = pd.read_csv('adult.test.csv')
 
@@ -173,6 +206,11 @@ def main():
 
     categories = list(data.columns)
     categories.remove('income')
+    for attr in categories:
+        if attr not in categorical_columns:
+            used_cont_values[attr] = []
+
+    data['predicted-label'] = np.nan
 
     # Data Cleaning
 
@@ -194,29 +232,43 @@ def main():
                  attr] = poorMode
 
     # train-test-split
+    split_size = math.floor(len(data) / 5)
+    data_chunks = []
+    start = 0
+    stop = split_size
+    for _ in range(5):
+        data_chunks.append(data[start:stop])
+        start = start + split_size
+        stop = stop + split_size
 
-    total_numRows = data['income'].count()
-    validation_numRows = math.floor((total_numRows * 0.1))
-
-    validation_data = data[0: validation_numRows]
-
-    trainingRange = math.floor((total_numRows - validation_numRows) / 5)
-
-    training_sets = []
+    accuracies = []
 
     for i in range(5):
-        start = validation_numRows + trainingRange * i
-        stop = validation_numRows + trainingRange * (i+1)
-        training_sets.append(
-            data[start: stop])
+        evaluation_data = data_chunks[i]
+        training_data = pd.concat(data_chunks[0: i] + data_chunks[i+1:])
+        validation_data = training_data[0: math.floor(
+            len(training_data) * 0.1)]
+        training_data = training_data[len(validation_data):]
+        print("fold: ", i, "training data: ",  len(training_data), "validation data: ", len(
+            validation_data), "evaluation data: ", len(evaluation_data))
+        root = Node(None, None, None, None)
+        grow(root, training_data, categories, 0.8 + i*0.05)
+        prune(root, root, validation_data)
+        accuracies.append(calc_accuracy(root, evaluation_data))
 
-    root = Node(None, None, "Not Leaf", None)
-    grow(root, data, categories, 0.80)
-
-    temp = data.apply(traverse_tree, node=root, axis=1)
-    data['predicted_label'] = temp
-    print(data.head(20))
-    print(len(data[data['income'] == data['predicted_label']])*100/len(data))
+    avg_acc = sum(accuracies) / len(accuracies)
+    print(avg_acc)
+    best_param = accuracies.index(max(accuracies))
+    root = Node(None, None, None, None)
+    training_data = data[0: math.floor(len(data) * 0.1)]
+    validation_data = data[len(training_data):]
+    grow(root, training_data, categories, accuracies[best_param])
+    prune(root, root, validation_data)
+    test_data = test_data.applymap(trim_strings)
+    temp = test_data.apply(traverse_tree, node=root, axis=1)
+    print(temp)
+    test_data['predicted-label'] = temp
+    test_data.to_csv("predicted.csv", index=False)
 
 
 if __name__ == "__main__":
