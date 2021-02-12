@@ -3,33 +3,12 @@ from numpy.lib.arraysetops import unique
 from numpy.lib.shape_base import split
 import pandas as pd
 import math
-from sklearn.utils import shuffle
 import copy
 
 categorical_columns = ['workclass', 'education', 'marital-status',
                        'occupation',  'relationship', 'race', 'sex', 'native-country']
 
 used_cont_values = {}
-# grow(node n, dataset D, atrributes A)
-#     if A is empty or then
-#         n.label = majority label in D
-#     else
-#         for all a in A do
-#             q(a) = InformationGain(a)
-#         b = attribute with max q(a)
-#         n.attribute = b
-#         p = number of partitions for n.attribute
-#         for i from 1 to p do
-#             Di = { d in D | d belongs to partion i of b}
-#             create new node sa child of n
-#             grow(ni, Di, A - {b})
-
-# prune(dataset D, node n)
-#     original_score = test(D, n)
-#     if n has no children
-#         return
-#     for each child of n
-#         prune(D)
 
 
 class Node:
@@ -198,8 +177,8 @@ def partition_cont(data, column_name):
 def main():
 
     # Initializing
-    data = pd.read_csv('adult.data.csv')
-    test_data = pd.read_csv('adult.test.csv')
+    data = pd.read_csv('data/adult.data.csv')
+    test_data = pd.read_csv('data/adult.test.csv')
 
     categorical_columns = ['workclass', 'education', 'marital-status',
                            'occupation',  'relationship', 'race', 'sex', 'native-country']
@@ -218,6 +197,7 @@ def main():
 
     def trim_strings(x): return x.strip() if isinstance(x, str) else x
     data = data.applymap(trim_strings)
+    test_data = test_data.applymap(trim_strings)
 
     rich = data[data['income'] == '>50K']
     poor = data[data['income'] == '<=50K']
@@ -230,6 +210,9 @@ def main():
                  attr] = richMode
         data.loc[((data[attr] == "?") & (data['income'] == '<=50K')),
                  attr] = poorMode
+
+        test_data.loc[(test_data[attr] == "?"),
+                      attr] = test_data[attr].mode()[0].strip()
 
     # train-test-split
     split_size = math.floor(len(data) / 5)
@@ -249,26 +232,23 @@ def main():
         validation_data = training_data[0: math.floor(
             len(training_data) * 0.1)]
         training_data = training_data[len(validation_data):]
-        print("fold: ", i, "training data: ",  len(training_data), "validation data: ", len(
-            validation_data), "evaluation data: ", len(evaluation_data))
         root = Node(None, None, None, None)
         grow(root, training_data, categories, 0.8 + i*0.05)
         prune(root, root, validation_data)
         accuracies.append(calc_accuracy(root, evaluation_data))
 
     avg_acc = sum(accuracies) / len(accuracies)
-    print(avg_acc)
+    print(accuracies)
+    print("Average accuracy: ", avg_acc)
     best_param = accuracies.index(max(accuracies))
     root = Node(None, None, None, None)
     training_data = data[0: math.floor(len(data) * 0.1)]
     validation_data = data[len(training_data):]
     grow(root, training_data, categories, accuracies[best_param])
     prune(root, root, validation_data)
-    test_data = test_data.applymap(trim_strings)
     temp = test_data.apply(traverse_tree, node=root, axis=1)
-    print(temp)
     test_data['predicted-label'] = temp
-    test_data.to_csv("predicted.csv", index=False)
+    test_data.to_csv("predictions.csv", index=False)
 
 
 if __name__ == "__main__":
