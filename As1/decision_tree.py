@@ -4,6 +4,7 @@ from numpy.lib.shape_base import split
 import pandas as pd
 import math
 import copy
+import reverse_geocoder as rg
 
 categorical_columns = ['workclass', 'education', 'marital-status',
                        'occupation',  'relationship', 'race', 'sex', 'native-country']
@@ -119,16 +120,16 @@ def calc_bestPartition(data, attr):
                 best_splitValue = split_on
                 partitions = temp_partitions
     return best_splitAttr, best_splitValue, partitions
-
-
-def calc_entropy(data):
-    poor_prob = len(data[data['income'] == '>50K']) / \
-        len(data) if len(data) > 0 else 0
-    rich_prob = len(data[data['income'] == '<=50K']) / \
-        len(data) if len(data) > 0 else 0
-
-    if (poor_prob == 0) or (rich_prob == 0):
-        return 0
+#
+#
+# def calc_entropy(data):
+#     poor_prob = len(data[data['income'] == '>50K']) / \
+#         len(data) if len(data) > 0 else 0
+#     rich_prob = len(data[data['income'] == '<=50K']) / \
+#         len(data) if len(data) > 0 else 0
+#
+#     if (poor_prob == 0) or (rich_prob == 0):
+    return 0
     else:
         return -(poor_prob * math.log2(poor_prob) + rich_prob * math.log2(rich_prob))
 
