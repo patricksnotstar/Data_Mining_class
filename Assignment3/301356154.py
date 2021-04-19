@@ -13,24 +13,25 @@ def main():
     itemsets, rules = apriori(
         transactions, min_support=0.005, min_confidence=0.7)
 
-    allItemSets = countDict(itemsets)
+    print('--------All--------')
+    printResult(itemsets)
 
+    print('--------Closed--------')
     ret_closed = closedItemSets(itemsets)
+    printResult(ret_closed)
 
-    print(ret_closed)
-
+    print('--------Maximal--------')
     itemsets_copy = copy.deepcopy(itemsets)
     ret_max = maximalItemSets(itemsets_copy)
-
-    print("All: ", allItemSets, " Closed: ", countDict(
-        ret_closed), " Maximal: ", countDict(ret_max))
+    printResult(ret_max)
 
 
-def countDict(itemsets):
+def printResult(itemsets):
     counter = 0
-    for d in itemsets.keys():
+    for d in sorted(itemsets.keys()):
+        print('Length ', d, ': ', len(itemsets[d]))
         counter += len(itemsets[d])
-    return counter
+    print('Total: ', counter)
 
 
 def closedItemSets(itemsets):
